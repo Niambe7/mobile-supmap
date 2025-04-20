@@ -22,6 +22,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const login = (user: User, token: string) => {
     setUser(user);
     setToken(token);
+    console.log("✅ Utilisateur connecté :", user);
+
   };
 
   const logout = () => {

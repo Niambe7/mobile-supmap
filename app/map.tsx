@@ -3,18 +3,25 @@ import {
   View,
   StyleSheet,
   TextInput,
-  Button,
   Alert,
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
   Text,
+  Animated,
+  Dimensions,
+  Switch,
+  Button,
 } from "react-native";
 import MapView, { Marker, Polyline, Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { useAuth } from "../context/AuthContext";
 import { fetchItinerary } from "../services/itinerary.service";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+
+
+const screenWidth = Dimensions.get("window").width;
 
 interface Coordinate {
   latitude: number;
@@ -25,15 +32,20 @@ export default function MapScreen() {
   const [location, setLocation] = useState<Coordinate | null>(null);
   const [region, setRegion] = useState<Region | null>(null);
   const [start, setStart] = useState("");
-  const [end, setEnd] = useState("Montluçon");
-  const [avoidTolls, setAvoidTolls] = useState(false);
+  const [end, setEnd] = useState("Gare de Lyon, Paris");
   const [routePoints, setRoutePoints] = useState<Coordinate[]>([]);
   const [simIndex, setSimIndex] = useState(0);
   const [isSimulating, setIsSimulating] = useState(false);
-  const [showControls, setShowControls] = useState(true);
+  const [avoidTolls, setAvoidTolls] = useState(true); // ✅ Activé par défaut
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [showSearchBox, setShowSearchBox] = useState(true);
+  const router = useRouter();
+
 
   const mapRef = useRef<MapView>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const drawerAnim = useRef(new Animated.Value(-screenWidth * 0.6)).current;
+
   const { user, logout } = useAuth();
 
   useEffect(() => {
@@ -43,11 +55,13 @@ export default function MapScreen() {
         Alert.alert("Permission refusée", "Active la géolocalisation");
         return;
       }
+
       const loc = await Location.getCurrentPositionAsync({});
       const coords = {
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude,
       };
+
       setLocation(coords);
       setRegion({
         ...coords,
@@ -57,6 +71,22 @@ export default function MapScreen() {
     })();
   }, []);
 
+  const toggleDrawer = () => {
+    const toValue = drawerOpen ? -screenWidth * 0.6 : 0;
+    Animated.timing(drawerAnim, {
+      toValue,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+    setDrawerOpen(!drawerOpen);
+  };
+
+  const handleLogout = () => {
+    logout();
+    toggleDrawer(); // referme le drawer
+    router.replace("/login");
+  };
+
   const useCurrentLocation = async () => {
     try {
       const loc = await Location.getCurrentPositionAsync({});
@@ -64,24 +94,20 @@ export default function MapScreen() {
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude,
       };
-  
       const [address] = await Location.reverseGeocodeAsync(coords);
       const readableAddress = `${address.name || ""} ${address.street || ""} ${address.city || ""}`.trim();
       setStart(readableAddress);
-  
-      console.log("📍 Adresse géolocalisée :", readableAddress);
     } catch (err) {
-      console.log("❌ Erreur reverse geocode :", err);
       Alert.alert("Erreur", "Impossible de récupérer une adresse.");
     }
   };
-  
 
   const handleItinerary = async () => {
     console.log("🧭 Début de la génération d'itinéraire...");
     console.log("🔑 user.id :", user?.id);
     console.log("📍 Départ :", start);
     console.log("🏁 Arrivée :", end);
+    console.log("🚧 Avoid tolls :", avoidTolls);
 
     if (!user?.id || !start || !end) {
       Alert.alert("Champs requis", "Merci de remplir les champs et être connecté.");
@@ -90,8 +116,6 @@ export default function MapScreen() {
 
     try {
       const points = await fetchItinerary(start, end, user.id, avoidTolls);
-      console.log("📦 Itinéraire reçu :", points.length, "points");
-
       const formatted = points.map((p: { lat: number; lng: number }) => ({
         latitude: p.lat,
         longitude: p.lng,
@@ -100,22 +124,20 @@ export default function MapScreen() {
       if (formatted.length > 0) {
         setRoutePoints(formatted);
         setSimIndex(0);
-        setShowControls(false);
+        Alert.alert("Itinéraire généré", `${formatted.length} points trouvés.`);
         setIsSimulating(false);
-        Alert.alert("Itinéraire OK ✅", `${formatted.length} points trouvés.`);
+        setShowSearchBox(false) // cache le bloc de recherche
       } else {
-        Alert.alert("Aucun itinéraire", "Aucun point reçu.");
+        Alert.alert("Aucun résultat", "Aucun point trouvé.");
       }
     } catch (err: any) {
-      console.log("❌ Erreur handleItinerary :", err.message);
-      Alert.alert("Erreur", err.message);
+      console.log("❌ fetchItinerary error :", err.response?.data || err.message);
+      Alert.alert("Erreur", err.message || "Erreur lors de la génération");
     }
   };
 
   const simulateRoute = () => {
     if (routePoints.length === 0) return;
-    console.log("🚗 Démarrage de la simulation...");
-
     setIsSimulating(true);
     intervalRef.current = setInterval(() => {
       setSimIndex((prev) => {
@@ -134,7 +156,6 @@ export default function MapScreen() {
   };
 
   const stopSimulation = () => {
-    console.log("🛑 Arrêt de la simulation.");
     if (intervalRef.current) clearInterval(intervalRef.current);
     setIsSimulating(false);
   };
@@ -154,37 +175,57 @@ export default function MapScreen() {
               <Marker coordinate={routePoints[0]} title="Départ" pinColor="green" />
               <Marker coordinate={routePoints[routePoints.length - 1]} title="Arrivée" pinColor="red" />
               {isSimulating && routePoints[simIndex] && (
-                <Marker coordinate={routePoints[simIndex]} anchor={{ x: 0.5, y: 0.5 }}>
-                  <Ionicons name="car-sport" size={28} color="blue" />
+                <Marker coordinate={routePoints[simIndex]}>
+                  <Ionicons name="car-sport" size={30} color="blue" />
                 </Marker>
               )}
             </>
           )}
         </MapView>
 
-        <TouchableOpacity style={styles.menuIcon} onPress={() => setShowControls(prev => !prev)}>
-          <Ionicons name="menu" size={30} color="#333" />
+        {/* ☰ Hamburger */}
+        <TouchableOpacity style={styles.menuIcon} onPress={toggleDrawer}>
+          <Ionicons name="menu" size={32} color="#333" />
         </TouchableOpacity>
 
-        {showControls && (
+        {/* 👉 Drawer latéral */}
+        <Animated.View style={[styles.drawer, { left: drawerAnim }]}>
+          <Text style={styles.drawerTitle}>Menu</Text>
+          <Button title="Déconnexion" color="red" onPress={handleLogout} />
+        </Animated.View>
+
+        {/* 🔍 Bloc jaune (formulaire) */}
+        {showSearchBox && (
           <View style={styles.controls}>
             <TextInput placeholder="Départ" value={start} onChangeText={setStart} style={styles.input} />
             <TextInput placeholder="Arrivée" value={end} onChangeText={setEnd} style={styles.input} />
-            <Button title="📍 Ma position actuelle" onPress={useCurrentLocation} />
-            <Button
-              title={avoidTolls ? "✅ Éviter les péages" : "🚧 Éviter les péages"}
-              onPress={() => setAvoidTolls(prev => !prev)}
-              color={avoidTolls ? "green" : "gray"}
-            />
-            <Button title="Générer l'itinéraire" onPress={handleItinerary} />
-            <Button title="Déconnexion" color="red" onPress={logout} />
+            <Button title="📍 MA POSITION ACTUELLE" onPress={useCurrentLocation} />
+
+            <View style={styles.switchContainer}>
+              <Text style={{ flex: 1 }}>Éviter les péages</Text>
+              <Switch value={avoidTolls} onValueChange={setAvoidTolls} />
+            </View>
+
+            <Button title="GÉNÉRER L'ITINÉRAIRE" onPress={handleItinerary} color="#007bff" />
           </View>
         )}
 
-        {!showControls && routePoints.length > 0 && (
+        {/* 🚗 Boutons de simulation */}
+        {!drawerOpen && routePoints.length > 0 && (
           <View style={styles.simulationButtons}>
-            <Button title="▶️ Démarrer la simulation" onPress={simulateRoute} disabled={isSimulating} />
+            <Button title="▶️ Démarrer simulation" onPress={simulateRoute} disabled={isSimulating} />
             <Button title="⏹️ Arrêter" onPress={stopSimulation} disabled={!isSimulating} />
+          </View>
+        )}
+
+        {/* ✏️ Bouton Modifier destination */}
+        {!showSearchBox && (
+          <View style={styles.editButton}>
+            <TouchableOpacity onPress={() => setShowSearchBox(true)}>
+              <View style={styles.editButtonBox}>
+                <Text style={styles.editButtonText}>✏️ Modifier destination</Text>
+              </View>
+            </TouchableOpacity>
           </View>
         )}
       </View>
@@ -192,7 +233,9 @@ export default function MapScreen() {
   );
 }
 
+
 const styles = StyleSheet.create({
+  
   container: { flex: 1 },
   map: { flex: 1 },
   menuIcon: {
@@ -205,6 +248,20 @@ const styles = StyleSheet.create({
     elevation: 5,
     zIndex: 10,
   },
+  drawer: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: screenWidth * 0.6,
+    backgroundColor: "#fff",
+    zIndex: 20,
+    padding: 20,
+    elevation: 10,
+  },
+  drawerTitle: {
+    fontSize: 20,
+    marginBottom: 20,
+  },
   controls: {
     position: "absolute",
     bottom: 20,
@@ -213,9 +270,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 10,
     padding: 15,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 5,
     elevation: 5,
     zIndex: 10,
   },
@@ -226,6 +280,11 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderRadius: 8,
   },
+  switchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 15,
+  },
   simulationButtons: {
     position: "absolute",
     bottom: 30,
@@ -234,4 +293,23 @@ const styles = StyleSheet.create({
     flexDirection: "column",
     gap: 10,
   },
+
+  editButton: {
+    position: "absolute",
+    top: 100,
+    right: 20,
+    zIndex: 15,
+  },
+  
+  editButtonBox: {
+    backgroundColor: "#fff",
+    padding: 10,
+    borderRadius: 5,
+    elevation: 4,
+  },
+  
+  editButtonText: {
+    fontWeight: "bold",
+  },
+  
 });
