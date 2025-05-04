@@ -1,4 +1,3 @@
-// services/itinerary.service.ts
 import api from "./api";
 
 export interface LatLng {
@@ -6,15 +5,24 @@ export interface LatLng {
   lng: number;
 }
 
+export interface StepDTO {
+  distance: { value: number; text: string };
+  duration: { value: number; text: string };
+  html_instructions: string;
+  polyline: { points: string };
+  maneuver?: string;
+}
+
 /**
  * Ce type correspond aux options renvoyées par /itineraries/search
  */
 export interface ItineraryOptionDTO {
-  id: number;                 // identifiant temporaire côté client
+  id: number;
   distance: number;           // en mètres
   duration: number;           // en secondes
   toll_free: boolean;
-  route_points: LatLng[];
+  route_points: LatLng[];     // pour affichage
+  steps: StepDTO[];           // instructions étape par étape
 }
 
 /**
@@ -43,36 +51,24 @@ export const fetchItineraries = async (
   avoidTolls: boolean
 ): Promise<ItineraryOptionDTO[]> => {
   const payload = { start_location: start, end_location: end, avoidTolls };
-  console.log("[ItineraryService] → fetchItineraries payload:", payload);
 
-  try {
-    // Note l'URL mise à jour : /itineraries/search
-    const res = await api.post("/itineraries/itineraries/search", payload);
-    console.log("[ItineraryService] ← /search response.data:", res.data);
+  const res = await api.post("/itineraries/itineraries/search", payload);
+  const raw: any[] = res.data.itineraries ?? [];
 
-    // L'API renvoie désormais { message, itineraries }
-    const options: ItineraryOptionDTO[] = res.data.itineraries ?? [];
-    console.log("[ItineraryService] ✔ Parsed options:", options);
-
-    return options;
-  } catch (err: any) {
-    console.error(
-      "[ItineraryService] ✖ fetchItineraries error:",
-      err.response?.data ?? err.message
-    );
-    throw err;
-  }
+  return raw.map(opt => ({
+    id: opt.id,
+    distance: opt.distance,
+    duration: opt.duration,
+    toll_free: opt.toll_free,
+    route_points: opt.route_points,
+    steps: opt.steps,
+  }));
 };
 
-export interface ItineraryOptionDTO {
-  id: number;
-  distance: number;
-  duration: number;
-  toll_free: boolean;
-  route_points: LatLng[];      // pour l'affichage
-  encoded_polyline: string;    // pour l’envoi / stockage
-}
-
+/**
+ * Enregistre l'itinéraire sélectionné en base
+ * Envoie les steps et les route_points pour qu'ils soient persistés
+ */
 export const loadItinerary = async (
   userId: number,
   choice: ItineraryOptionDTO,
@@ -87,10 +83,11 @@ export const loadItinerary = async (
       distance: choice.distance,
       duration: choice.duration,
       toll_free: choice.toll_free,
-      // 👇 on envoie la chaîne encodée, pas tout le tableau
-      encoded_polyline: choice.encoded_polyline,
+      steps: choice.steps,
+      route_points: choice.route_points,
     },
   };
+
   const res = await api.post("/itineraries/itineraries/load", body);
-  return res.data.itinerary;
+  return res.data.itinerary as ItineraryDTO;
 };
