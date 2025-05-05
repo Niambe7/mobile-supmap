@@ -30,6 +30,8 @@ import {
   ItineraryOptionDTO,
 } from "../services/itinerary.service";
 import { useRouter } from "expo-router";
+import { CameraView, useCameraPermissions } from 'expo-camera';
+
 
 interface Coordinate {
   latitude: number;
@@ -83,6 +85,12 @@ export default function MapScreen() {
   const [traveledPoints, setTraveledPoints] = useState<Coordinate[]>([]);
   const [currentItineraryId, setCurrentItineraryId] = useState<number | null>(null);
 
+  // Permissions et visibilité de la caméra
+const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+const [cameraVisible, setCameraVisible] = useState(false);
+const [scanned, setScanned] = useState(false);
+
+
 
   const [itineraries, setItineraries] = useState<ItineraryOptionDTO[]>([]);
   const [choosingRoute, setChoosingRoute] = useState(false);
@@ -107,6 +115,15 @@ export default function MapScreen() {
   const navSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
   const drawerAnim = useRef(new Animated.Value(-screenWidth * 0.6)).current;
   const { user, logout, token } = useAuth();
+
+
+
+  const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
+    setScanned(true);
+    Alert.alert("Code scanné", `Type : ${type}\nDonnées : ${data}`);
+    setCameraVisible(false);
+  };
+  
 
   // 1) Socket: écouter deux events
   useEffect(() => {
@@ -605,6 +622,21 @@ async function handleConfirm(incidentId: number, confirmed: boolean, carPosition
           <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
             <Text style={styles.logoutText}>Déconnexion</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+        onPress={() => {
+          if (!cameraPermission?.granted) {
+            requestCameraPermission();
+          } else {
+            setScanned(false);
+            setCameraVisible(true);
+          }
+        }}
+        style={[styles.logoutButton, { backgroundColor: '#007bff', marginTop: 12 }]}
+      >
+        <Text style={styles.logoutText}>Scanner un code-barres</Text>
+      </TouchableOpacity>
+
         </View>
       </TouchableWithoutFeedback>
     </Animated.View>
@@ -684,19 +716,7 @@ async function handleConfirm(incidentId: number, confirmed: boolean, carPosition
     </TouchableWithoutFeedback>
   )}
 
-  <Animated.View style={[styles.drawer, { left: drawerAnim }]}>
-    {/* Empêche le toucher de déclencher le backdrop */}
-    <TouchableWithoutFeedback>
-      <View>
-        <Text style={styles.drawerTitle}>Menu</Text>
-        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-          <Text style={styles.logoutText}>Déconnexion</Text>
-        </TouchableOpacity>
-      </View>
-    </TouchableWithoutFeedback>
-  </Animated.View>
-
-
+ 
         {/* Search form */}
         {showSearchBox && (
           <View style={styles.controls}>
@@ -791,6 +811,28 @@ async function handleConfirm(incidentId: number, confirmed: boolean, carPosition
             </TouchableOpacity>
           </View>
         )}
+        <Modal visible={cameraVisible} animationType="slide">
+          <View style={{ flex: 1 }}>
+            <CameraView
+              style={{ flex: 1 }}
+              onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+              barcodeScannerSettings={{ barcodeTypes: ['qr', 'ean13', 'ean8'] }}
+            />
+            <TouchableOpacity
+              style={{
+                position: 'absolute',
+                top: 40,
+                right: 20,
+                backgroundColor: 'rgba(0,0,0,0.5)',
+                padding: 10,
+                borderRadius: 5
+              }}
+              onPress={() => setCameraVisible(false)}
+            >
+              <Text style={{ color: '#fff', fontWeight: 'bold' }}>Fermer</Text>
+            </TouchableOpacity>
+          </View>
+        </Modal>
       </View>
     </KeyboardAvoidingView>
   );
@@ -801,6 +843,19 @@ async function handleConfirm(incidentId: number, confirmed: boolean, carPosition
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
+  closeCameraBtn: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 10,
+    borderRadius: 5,
+    zIndex: 10,
+  },
+  closeCameraTxt: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
   controls: {
     position: "absolute",
     bottom:20,
