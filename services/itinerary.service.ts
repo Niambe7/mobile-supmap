@@ -91,3 +91,18 @@ export const loadItinerary = async (
   const res = await api.post("/itineraries/itineraries/load", body);
   return res.data.itinerary as ItineraryDTO;
 };
+
+/**
+ * Récupère un itinéraire complet par son ID
+ */
+export const getItineraryById = async (
+  itineraryId: number
+): Promise<ItineraryDTO> => {
+  // On appelle GET sur /itineraries/itineraries/{id}
+  const res = await api.get("/itineraries/itineraries/" + itineraryId);
+  // La réponse a ce format : { itinerary: { id, user_id, start_location, end_location, route_points: [...] } }
+  if (!res.data.itinerary) {
+    throw new Error(`Itinéraire ${itineraryId} non trouvé`);
+  }
+  return res.data.itinerary as ItineraryDTO;
+};

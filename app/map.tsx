@@ -26,6 +26,7 @@ import { useAuth } from "../context/AuthContext";
 import { reportIncident , contributeIncident } from "../services/incident.service";
 import {
   fetchItineraries,
+  getItineraryById ,
   loadItinerary,
   ItineraryOptionDTO,
 } from "../services/itinerary.service";
@@ -118,11 +119,46 @@ const [scanned, setScanned] = useState(false);
 
 
 
-  const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
+  const handleBarCodeScanned = async ({ data }: { data: string }) => {
     setScanned(true);
-    Alert.alert("Code scanné", `Type : ${type}\nDonnées : ${data}`);
-    setCameraVisible(false);
+  
+    // 1) On extrait l'ID (payload format "itinerary:<id>")
+    const match = data.match(/^itinerary:(\d+)$/);
+    if (!match) {
+      Alert.alert("QR invalide", "Ce QR ne contient pas un ID d'itinéraire valide.");
+      setCameraVisible(false);
+      return;
+    }
+    const itineraryId = Number(match[1]);
+  
+    try {
+      // 2) On récupère l'itinéraire via notre service
+      const itin = await getItineraryById(itineraryId);
+  
+      // 3) On met à jour les points sur la carte
+      const coords = itin.route_points.map(p => ({
+        latitude: p.lat,
+        longitude: p.lng,
+      }));
+      setRoutePoints(coords);
+      setCurrentItineraryId(itin.id);
+      setShowSearchBox(false);
+      setChoosingRoute(false);
+  
+      // 4) On recentre la carte simplement
+      mapRef.current?.fitToCoordinates(coords, {
+        edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
+        animated: true,
+      });
+  
+      Alert.alert("Itinéraire chargé", `Itinéraire #${itin.id} affiché sur la carte.`);
+    } catch (err: any) {
+      Alert.alert("Erreur", err.message);
+    } finally {
+      setCameraVisible(false);
+    }
   };
+  
   
 
   // 1) Socket: écouter deux events
